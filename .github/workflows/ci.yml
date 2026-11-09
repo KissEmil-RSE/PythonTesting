@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_COMPILE_BYTECODE: "1"
+  UV_LINK_MODE: copy
+
+jobs:
+  ruff:
+    runs-on: [self-hosted, wsl]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check --output-format=github
+
+  ruff-format:
+    runs-on: [self-hosted, wsl]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: ruff format --check
+        continue-on-error: true 
+        run: uv run ruff format --check
+
+  ty:
+    needs: [ruff, ruff-format]
+    runs-on: [self-hosted, wsl]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ty check
+
+  pytest:
+    needs: ty
+    runs-on: [self-hosted, wsl]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest --cov --cov-report=term --cov-report=xml:coverage.xml --junitxml=junit.xml
+      - name: Coverage in Job-Summary
+        if: always()
+        run: uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            junit.xml
+            coverage.xml
